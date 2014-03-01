@@ -12,6 +12,7 @@
 #include "XPLMMenus.h"
 #include "XPWidgets.h"
 #include "XPStandardWidgets.h"
+#include "XPLMNavigation.h"
 #include "parson.c"
 
 #define URL_BASE "http://api.vateud.net/online/atc/"
@@ -104,9 +105,9 @@ void MyDrawWindowCallback(
                     if (strcmp(callsign, lookupCallsign) == 0) {
                         atis = json_object_dotget_string(station, "atis");
                         status = STATUS_PAPER;
-                        XPLMDebugString("ATIS: ");
-                        XPLMDebugString(atis);
-                        XPLMDebugString("\n");
+                        //XPLMDebugString("ATIS: ");
+                        //XPLMDebugString(atis);
+                        //XPLMDebugString("\n");
                         break;
                     }
                 }
@@ -196,6 +197,37 @@ void *PullUrl(void *arg)
     return NULL;
 }
 
+int getClosestAirportId(char *id, int index)
+{    
+    XPLMNavRef waypoint;
+    float lat = 0.f, lon = 0.f;
+    XPLMGetFMSEntryInfo(index, NULL, NULL, &waypoint, NULL, &lat, &lon);
+    
+    if (lat == 0.f || lon == 0.f)
+        return 0;
+    
+    XPLMNavRef airport = XPLMFindNavAid(NULL, NULL, &lat, &lon, NULL, xplm_Nav_Airport);
+    XPLMGetNavAidInfo(airport, NULL, NULL, NULL, NULL, NULL, NULL, id, NULL, NULL);
+    
+    return 1;
+}
+
+int getDepartureAirportId(char *id)
+{
+    return getClosestAirportId(id, 0);
+}
+
+int getDestinationAirportId(char *id)
+{
+    int count = XPLMCountFMSEntries();
+    if (count < 2)
+        return 0;
+    
+    int index = count - 1;
+    
+    return getClosestAirportId(id, index);
+}
+
 static int CoordInRect(float x, float y, float l, float t, float r, float b)
 {
     return ((x >= l) && (x < r) && (y < t) && (y >= b));
@@ -246,6 +278,18 @@ int MyHandleMouseClickCallback(
     pthread_create(&tid, NULL, PullUrl, NULL);
     
     status = STATUS_EMPTY;
+    
+    char dep[32] = "NONE";
+    char dest[32] = "NONE";
+    
+    getDepartureAirportId(dep);
+    getDestinationAirportId(dest);
+    XPLMDebugString("Departure: ");
+    XPLMDebugString(dep);
+    XPLMDebugString("\n\n");
+    XPLMDebugString("Destination: ");
+    XPLMDebugString(dest);
+    XPLMDebugString("\n\n");
     
 	return 1;
 }
