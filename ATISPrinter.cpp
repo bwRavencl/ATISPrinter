@@ -197,7 +197,7 @@ void *PullUrl(void *arg)
     return NULL;
 }
 
-int getClosestAirportId(char *id, int index)
+int GetClosestAirportId(char *id, int index)
 {    
     XPLMNavRef waypoint;
     float lat = 0.f, lon = 0.f;
@@ -212,12 +212,12 @@ int getClosestAirportId(char *id, int index)
     return 1;
 }
 
-int getDepartureAirportId(char *id)
+int GetDepartureAirportId(char *id)
 {
-    return getClosestAirportId(id, 0);
+    return GetClosestAirportId(id, 0);
 }
 
-int getDestinationAirportId(char *id)
+int GetDestinationAirportId(char *id)
 {
     int count = XPLMCountFMSEntries();
     if (count < 2)
@@ -225,7 +225,7 @@ int getDestinationAirportId(char *id)
     
     int index = count - 1;
     
-    return getClosestAirportId(id, index);
+    return GetClosestAirportId(id, index);
 }
 
 static int CoordInRect(float x, float y, float l, float t, float r, float b)
@@ -282,8 +282,8 @@ int MyHandleMouseClickCallback(
     char dep[32] = "NONE";
     char dest[32] = "NONE";
     
-    getDepartureAirportId(dep);
-    getDestinationAirportId(dest);
+    GetDepartureAirportId(dep);
+    GetDestinationAirportId(dest);
     XPLMDebugString("Departure: ");
     XPLMDebugString(dep);
     XPLMDebugString("\n\n");
