@@ -17,50 +17,60 @@
 
 #define URL_BASE "http://api.vateud.net/online/atc/"
 #define URL_EXTENSION ".json"
-#define STATUS_EMPTY 0
-#define STATUS_PAPER 1
+#define REQUEST_NONE 0
+#define REQUEST_ATIS 1
+#define REQUEST_METAR 2
 
-#define WINDOW_WIDTH 200
-#define WINDOW_HEIGHT 280
+#define WINDOW_WIDTH 500
+#define WINDOW_HEIGHT 200
 #define WINDOW_POS_X 20
 #define WINDOW_POS_Y 20 + WINDOW_HEIGHT
-
-#define BITMAP_PRINTER_EMPTY "/Users/matteo/printer_empty"
-#define BITMAP_PRINTER_PAPER "/Users/matteo/printer_paper"
-#define BITMAP_WIDTH 256
-#define BITMAP_HEIGHT 256
-
-static XPLMDataRef red = NULL, green = NULL, blue = NULL;
 
 static XPLMWindowID	mainWindow = NULL;
 static XPWidgetID icaoTextField = NULL;
 
 static char *getData = NULL;
-static int status = STATUS_EMPTY;
-static int textureEmpty = 0;
-static int texturePaper = 0;
-const static char *icaoCode = "ebbr";
+static int newData = 0;
+static int requestType = 0;
+static const char *message = NULL;
+static char icaoCode[32];
 
-static int DrawTexture(int left, int top, int right, int bottom)
-{
-    if (status == STATUS_PAPER)
-        XPLMBindTexture2d(texturePaper, 0);
-    else
-        XPLMBindTexture2d(textureEmpty, 0);
+void parseJSON() {
+    JSON_Value *root_value = json_parse_string(getData);
     
-    XPLMSetGraphicsState(0, 1, 0, 0, 0, 0, 0);
+    if (root_value != NULL) {
+        JSON_Value_Type type = root_value->type;
+        
+        if (type == JSONArray) {
+            JSON_Array *stations = json_value_get_array(root_value);
+            
+            char lookupCallsign[32];
+            sprintf(lookupCallsign, "%s%s", icaoCode, "_ATIS");
+            
+            for (int i = 0; i < json_array_get_count(stations); i++) {
+                const JSON_Object *station = json_array_get_object(stations, i);
+                const char *callsign = json_object_dotget_string(station, "callsign");
+                
+                if (strcmp(callsign, lookupCallsign) == 0) {
+                    message = json_object_dotget_string(station, "atis");
+                    XPLMDebugString(message);
+                    break;
+                }
+            }
+        }
+        
+        json_value_free(root_value);
+    }
     
-    glColor3f(XPLMGetDataf(red), XPLMGetDataf(green), XPLMGetDataf(blue));
-    
-    glPushMatrix();
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.f, 1.f);        glVertex2f(left, bottom);
-    glTexCoord2f(0.f, 0.f);        glVertex2f(left, top);
-    glTexCoord2f(1.f, 0.f);        glVertex2f(right, top);
-    glTexCoord2f(1.f, 1.f);        glVertex2f(right, bottom);
-    glEnd();
-    glPopMatrix();
-    glFlush();
+    newData = 0;
+}
+
+void Reset() {
+    //icaoCode = NULL;
+    message = NULL;
+    requestType = REQUEST_NONE;
+    getData = NULL;
+    newData = 0;
 }
 
 void MyDrawWindowCallback(
@@ -72,54 +82,29 @@ void MyDrawWindowCallback(
 	
 	XPLMGetWindowGeometry(inWindowID, &left, &top, &right, &bottom);
     
-    DrawTexture(left, top, right, bottom);
-    
-    const char *atis = "---";
     if (getData != NULL) {
-        atis = "Not available.";
+        //if (newData)
+            parseJSON();
         
-        JSON_Value *root_value = json_parse_string(getData);
+        if (message != NULL) {
         
-        if (root_value != NULL) {
-            JSON_Value_Type type = root_value->type;
+            XPLMDrawTranslucentDarkBox(left, top, right, bottom);
+        
+            /*char out[512];
+            sprintf(out, "SIZE: %d\n", (int) sizeof(message));
+            XPLMDebugString(out);
+        
+            char m[sizeof(message)];
+            strcpy(m, message[1], sizeof(message) - 1);
+            m[sizeof(message) - 1] = '\0';*/
             
-            if (type == JSONArray) {
-                JSON_Array *stations = json_value_get_array(root_value);
-                
-                char uppercaseICAO[sizeof(icaoCode)];
-                int i = 0;
-                while (icaoCode[i])
-                {
-                    char c = icaoCode[i];
-                    uppercaseICAO[i] = toupper(c);
-                    i++;
-                }
-                
-                char lookupCallsign[16];
-                sprintf(lookupCallsign, "%s%s", uppercaseICAO, "_ATIS");
-                
-                for (int i = 0; i < json_array_get_count(stations); i++) {
-                    const JSON_Object *station = json_array_get_object(stations, i);
-                    const char *callsign = json_object_dotget_string(station, "callsign");
-                    
-                    if (strcmp(callsign, lookupCallsign) == 0) {
-                        atis = json_object_dotget_string(station, "atis");
-                        status = STATUS_PAPER;
-                        //XPLMDebugString("ATIS: ");
-                        //XPLMDebugString(atis);
-                        //XPLMDebugString("\n");
-                        break;
-                    }
-                }
-            }
-            
-            json_value_free(root_value);
+            char *m = strndup(message+29, 29+50);
+        
+            XPLMDrawString(color, left + 50, top - 20, m, NULL, xplmFont_Basic);
+        
+            // TODO: start thread to reset getData after x seconds and hide the window
         }
     }
-    
-	XPLMDrawString(color, left + 50, top - 20,
-                   (char*) atis, NULL, xplmFont_Basic);
-    
 }
 
 void MyHandleKeyCallback(
@@ -189,10 +174,14 @@ char *HandleUrl(const char* url) {
 
 void *PullUrl(void *arg)
 {
-    char url[255];
-    sprintf(url, "%s%s%s", URL_BASE, icaoCode, URL_EXTENSION);
+    if (icaoCode != NULL) {
+        char url[255];
+        sprintf(url, "%s%s%s", URL_BASE, icaoCode, URL_EXTENSION);
+        XPLMDebugString(url);
     
-    getData = HandleUrl(url);
+        getData = HandleUrl(url);
+        newData = 1;
+    }
     
     return NULL;
 }
@@ -250,7 +239,7 @@ int MyHandleMouseClickCallback(
     
 	switch(inMouse) {
         case xplm_MouseDown:
-            if (CoordInRect(x, y, left, top, right, top - 15))
+            if (CoordInRect(x, y, left, top, right, bottom))
             {
                 dX = x - left;
                 dY = y - top;
@@ -274,71 +263,31 @@ int MyHandleMouseClickCallback(
             break;
 	}
     
-    pthread_t tid;
-    pthread_create(&tid, NULL, PullUrl, NULL);
-    
-    status = STATUS_EMPTY;
-    
-    char dep[32] = "NONE";
-    char dest[32] = "NONE";
-    
-    GetDepartureAirportId(dep);
-    GetDestinationAirportId(dest);
-    XPLMDebugString("Departure: ");
-    XPLMDebugString(dep);
-    XPLMDebugString("\n\n");
-    XPLMDebugString("Destination: ");
-    XPLMDebugString(dest);
-    XPLMDebugString("\n\n");
-    
 	return 1;
 }
 
-GLuint LoadTexture(const char *filename, int width, int height)
+void MyHandleMenuCallback(void *inMenuRef, void *inItemRef)
 {
-    GLuint texture;
-    unsigned char *data;
-    FILE *file;
+    int item = (long) inItemRef;
+    //char airport[32];
     
-    // open texture data
-    file = fopen(filename, "rb");
-    if (file == NULL) return 0;
+    if (item == 0 || item == 2)
+        GetDepartureAirportId(icaoCode);
+    else
+        GetDestinationAirportId(icaoCode);
     
-    // allocate buffer
-    data = (unsigned char*) malloc(width * height * 4);
+    //icaoCode = airport;
+    XPLMDebugString(icaoCode);
     
-    // read texture data
-    fread(data, width * height * 4, 1, file);
-    fclose(file);
+    if (item == 0 || item == 1)
+        requestType = REQUEST_ATIS;
+    else
+        requestType = REQUEST_METAR;
     
-    // allocate a texture name
-    glGenTextures(1, &texture);
+    pthread_t tid;
+    pthread_create(&tid, NULL, PullUrl, NULL);
     
-    // select our current texture
-    glBindTexture(GL_TEXTURE_2D, texture);
-    
-    // select modulate to mix texture with color for shading
-    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-    
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_DECAL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_DECAL);
-    
-    // when texture area is small, bilinear filter the closest mipmap
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
-    // when texture area is large, bilinear filter the first mipmap
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    
-    // texture should tile
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    
-    // build our texture mipmaps
-    gluBuild2DMipmaps(GL_TEXTURE_2D, 4, width, height, GL_RGBA, GL_UNSIGNED_BYTE, data);
-    
-    // free buffer
-    free(data);
-    
-    return texture;
+    XPShowWidget(mainWindow);
 }
 
 PLUGIN_API int XPluginStart(
@@ -349,13 +298,13 @@ PLUGIN_API int XPluginStart(
 	strcpy(outName, "ATIS Printer");
 	strcpy(outSig, "de.bwravencl.atis_printer");
 	strcpy(outDesc, "A plugin that prints ATIS data from the VATSIM network.");
+	
+	XPLMMenuID menu = XPLMCreateMenu("ACARS Weather", NULL, 0, MyHandleMenuCallback, 0);
     
-    red = XPLMFindDataRef("sim/graphics/misc/cockpit_light_level_r");
-	green = XPLMFindDataRef("sim/graphics/misc/cockpit_light_level_g");
-	blue = XPLMFindDataRef("sim/graphics/misc/cockpit_light_level_b");
-    
-    textureEmpty = LoadTexture(BITMAP_PRINTER_EMPTY, BITMAP_WIDTH, BITMAP_HEIGHT);
-    texturePaper = LoadTexture(BITMAP_PRINTER_PAPER, BITMAP_WIDTH, BITMAP_HEIGHT);
+	XPLMAppendMenuItem(menu, "Departure ATIS", (void *) 0, 1);
+	XPLMAppendMenuItem(menu, "Destination ATIS", (void *) 1, 1);
+    XPLMAppendMenuItem(menu, "Departure METAR", (void *) 2, 1);
+	XPLMAppendMenuItem(menu, "Destination METAR", (void *) 3, 1);
     
 	mainWindow = XPLMCreateWindow(
                               WINDOW_POS_X, WINDOW_POS_Y, WINDOW_POS_X + WINDOW_WIDTH, WINDOW_POS_Y - WINDOW_HEIGHT,
@@ -364,13 +313,6 @@ PLUGIN_API int XPluginStart(
                               MyHandleKeyCallback,
                               MyHandleMouseClickCallback,
                               NULL);
-    icaoTextField = XPCreateWidget(WINDOW_POS_X + 10, WINDOW_POS_Y - 10, WINDOW_POS_X + 80, WINDOW_POS_Y - 40,
-                   1,
-                   "TEST",
-                   0,
-                   mainWindow,
-                   xpWidgetClass_TextField);
-    XPSetWidgetProperty(icaoTextField, xpProperty_MaxCharacters, 4);
     
 	return 1;
 }
@@ -378,14 +320,6 @@ PLUGIN_API int XPluginStart(
 PLUGIN_API void	XPluginStop(void)
 {
 	XPLMDestroyWindow(mainWindow);
-    
-    //XPLMUnregisterDrawCallback(DrawTexture, xplm_Phase_Window, 0, NULL);
-    /*XPLMBindTexture2d(textureEmpty,0);
-    GLuint t = textureEmpty;
-    glDeleteTextures(1, &t);
-    XPLMBindTexture2d(texturePaper,0);
-    t = texturePaper;
-    glDeleteTextures(1, &t);*/
 }
 
 PLUGIN_API void XPluginDisable(void)
